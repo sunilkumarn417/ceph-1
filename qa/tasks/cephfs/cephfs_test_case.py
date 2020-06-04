@@ -1,16 +1,15 @@
 import time
 import json
 import logging
-from unittest import case
 from tasks.ceph_test_case import CephTestCase
 import os
 import re
-from StringIO import StringIO
 
 from tasks.cephfs.fuse_mount import FuseMount
 
 from teuthology.orchestra import run
 from teuthology.orchestra.run import CommandFailedError
+from teuthology.contextutil import safe_while
 
 
 log = logging.getLogger(__name__)
@@ -59,18 +58,18 @@ class CephFSTestCase(CephTestCase):
     # requires REQUIRE_FILESYSTEM = True
     REQUIRE_RECOVERY_FILESYSTEM = False
 
-    LOAD_SETTINGS = []
+    LOAD_SETTINGS = [] # type: ignore
 
     def setUp(self):
         super(CephFSTestCase, self).setUp()
 
         if len(self.mds_cluster.mds_ids) < self.MDSS_REQUIRED:
-            raise case.SkipTest("Only have {0} MDSs, require {1}".format(
+            self.skipTest("Only have {0} MDSs, require {1}".format(
                 len(self.mds_cluster.mds_ids), self.MDSS_REQUIRED
             ))
 
         if len(self.mounts) < self.CLIENTS_REQUIRED:
-            raise case.SkipTest("Only have {0} clients, require {1}".format(
+            self.skipTest("Only have {0} clients, require {1}".format(
                 len(self.mounts), self.CLIENTS_REQUIRED
             ))
 
@@ -79,11 +78,11 @@ class CephFSTestCase(CephTestCase):
                 # kclient kill() power cycles nodes, so requires clients to each be on
                 # their own node
                 if self.mounts[0].client_remote.hostname == self.mounts[1].client_remote.hostname:
-                    raise case.SkipTest("kclient clients must be on separate nodes")
+                    self.skipTest("kclient clients must be on separate nodes")
 
         if self.REQUIRE_ONE_CLIENT_REMOTE:
             if self.mounts[0].client_remote.hostname in self.mds_cluster.get_mds_hostnames():
-                raise case.SkipTest("Require first client to be on separate server from MDSs")
+                self.skipTest("Require first client to be on separate server from MDSs")
 
         # Create friendly mount_a, mount_b attrs
         for i in range(0, self.CLIENTS_REQUIRED):
@@ -98,9 +97,8 @@ class CephFSTestCase(CephTestCase):
 
         # To avoid any issues with e.g. unlink bugs, we destroy and recreate
         # the filesystem rather than just doing a rm -rf of files
-        self.mds_cluster.mds_stop()
-        self.mds_cluster.mds_fail()
         self.mds_cluster.delete_all_filesystems()
+        self.mds_cluster.mds_restart() # to reset any run-time configs, etc.
         self.fs = None # is now invalid!
         self.recovery_fs = None
 
@@ -131,7 +129,6 @@ class CephFSTestCase(CephTestCase):
 
         if self.REQUIRE_FILESYSTEM:
             self.fs = self.mds_cluster.newfs(create=True)
-            self.fs.mds_restart()
 
             # In case some test messed with auth caps, reset them
             for client_id in client_mount_ids:
@@ -141,17 +138,16 @@ class CephFSTestCase(CephTestCase):
                     'mon', 'allow r',
                     'osd', 'allow rw pool={0}'.format(self.fs.get_data_pool_name()))
 
-            # wait for mds restart to complete...
+            # wait for ranks to become active
             self.fs.wait_for_daemons()
 
             # Mount the requested number of clients
             for i in range(0, self.CLIENTS_REQUIRED):
-                self.mounts[i].mount()
-                self.mounts[i].wait_until_mounted()
+                self.mounts[i].mount_wait()
 
         if self.REQUIRE_RECOVERY_FILESYSTEM:
             if not self.REQUIRE_FILESYSTEM:
-                raise case.SkipTest("Recovery filesystem requires a primary filesystem as well")
+                self.skipTest("Recovery filesystem requires a primary filesystem as well")
             self.fs.mon_manager.raw_cluster_cmd('fs', 'flag', 'set',
                                                 'enable_multiple', 'true',
                                                 '--yes-i-really-mean-it')
@@ -166,14 +162,12 @@ class CephFSTestCase(CephTestCase):
         # Load an config settings of interest
         for setting in self.LOAD_SETTINGS:
             setattr(self, setting, float(self.fs.mds_asok(
-                ['config', 'get', setting], self.mds_cluster.mds_ids[0]
+                ['config', 'get', setting], list(self.mds_cluster.mds_ids)[0]
             )[setting]))
 
         self.configs_set = set()
 
     def tearDown(self):
-        super(CephFSTestCase, self).tearDown()
-
         self.mds_cluster.clear_firewall()
         for m in self.mounts:
             m.teardown()
@@ -183,6 +177,8 @@ class CephFSTestCase(CephTestCase):
 
         for subsys, key in self.configs_set:
             self.mds_cluster.clear_ceph_conf(subsys, key)
+
+        return super(CephFSTestCase, self).tearDown()
 
     def set_conf(self, subsys, key, value):
         self.configs_set.add((subsys, key))
@@ -229,6 +225,15 @@ class CephFSTestCase(CephTestCase):
     def _session_by_id(self, session_ls):
         return dict([(s['id'], s) for s in session_ls])
 
+    def wait_until_evicted(self, client_id, timeout=30):
+        def is_client_evicted():
+            ls = self._session_list()
+            for s in ls:
+                if s['id'] == client_id:
+                    return False
+            return True
+        self.wait_until_true(is_client_evicted, timeout)
+
     def wait_for_daemon_start(self, daemon_ids=None):
         """
         Wait until all the daemons appear in the FSMap, either assigned
@@ -246,7 +251,7 @@ class CephFSTestCase(CephTestCase):
                 timeout=30
             )
         except RuntimeError:
-            log.warn("Timeout waiting for daemons {0}, while we have {1}".format(
+            log.warning("Timeout waiting for daemons {0}, while we have {1}".format(
                 daemon_ids, get_daemon_names()
             ))
             raise
@@ -254,21 +259,21 @@ class CephFSTestCase(CephTestCase):
     def delete_mds_coredump(self, daemon_id):
         # delete coredump file, otherwise teuthology.internal.coredump will
         # catch it later and treat it as a failure.
-        p = self.mds_cluster.mds_daemons[daemon_id].remote.run(args=[
-            "sudo", "sysctl", "-n", "kernel.core_pattern"], stdout=StringIO())
-        core_dir = os.path.dirname(p.stdout.getvalue().strip())
+        core_pattern = self.mds_cluster.mds_daemons[daemon_id].remote.sh(
+            "sudo sysctl -n kernel.core_pattern")
+        core_dir = os.path.dirname(core_pattern.strip())
         if core_dir:  # Non-default core_pattern with a directory in it
             # We have seen a core_pattern that looks like it's from teuthology's coredump
             # task, so proceed to clear out the core file
             log.info("Clearing core from directory: {0}".format(core_dir))
 
             # Verify that we see the expected single coredump
-            ls_proc = self.mds_cluster.mds_daemons[daemon_id].remote.run(args=[
+            ls_output = self.mds_cluster.mds_daemons[daemon_id].remote.sh([
                 "cd", core_dir, run.Raw('&&'),
                 "sudo", "ls", run.Raw('|'), "sudo", "xargs", "file"
-            ], stdout=StringIO())
+            ])
             cores = [l.partition(":")[0]
-                     for l in ls_proc.stdout.getvalue().strip().split("\n")
+                     for l in ls_output.strip().split("\n")
                      if re.match(r'.*ceph-mds.* -i +{0}'.format(daemon_id), l)]
 
             log.info("Enumerated cores: {0}".format(cores))
@@ -286,7 +291,7 @@ class CephFSTestCase(CephTestCase):
         timeout = 30
         pause = 2
         test = sorted(test)
-        for i in range(timeout/pause):
+        for i in range(timeout // pause):
             subtrees = self.fs.mds_asok(["get", "subtrees"], mds_id=status.get_rank(self.fs.id, rank)['name'])
             subtrees = filter(lambda s: s['dir']['path'].startswith('/'), subtrees)
             filtered = sorted([(s['dir']['path'], s['auth_first']) for s in subtrees])
@@ -297,4 +302,13 @@ class CephFSTestCase(CephTestCase):
                     self.assertTrue(s['export_pin'] == s['auth_first'])
                 return subtrees
             time.sleep(pause)
-        raise RuntimeError("rank {0} failed to reach desired subtree state", rank)
+        raise RuntimeError("rank {0} failed to reach desired subtree state".format(rank))
+
+    def _wait_until_scrub_complete(self, path="/", recursive=True):
+        out_json = self.fs.rank_tell(["scrub", "start", path] + ["recursive"] if recursive else [])
+        with safe_while(sleep=10, tries=10) as proceed:
+            while proceed():
+                out_json = self.fs.rank_tell(["scrub", "status"])
+                if out_json['status'] == "no active scrubs running":
+                    break;
+
