@@ -84,6 +84,7 @@ def normalize_hostnames(ctx):
     finally:
         pass
 
+
 @contextlib.contextmanager
 def download_cephadm(ctx, config, ref):
     cluster_name = config['cluster']
@@ -92,7 +93,27 @@ def download_cephadm(ctx, config, ref):
         ref = config.get('cephadm_branch', ref)
         git_url = teuth_config.get_ceph_git_url()
         log.info('Downloading cephadm (repo %s ref %s)...' % (git_url, ref))
-        if git_url.startswith('https://github.com/'):
+        if ctx.config.get('redhat'):
+            # Install cephadm
+            ctx.cluster.run(
+                args=[
+                    'sudo',
+                    'yum', 'install',
+                    run.Raw('-y'),
+                    'cephadm'
+                ],
+            )
+            ctx.cluster.run(
+                args=[
+                    'cp',
+                    run.Raw('$(which cephadm)'),
+                    ctx.cephadm,
+                    run.Raw('&&'),
+                    'ls', '-l',
+                    ctx.cephadm,
+                ],
+            )
+        elif git_url.startswith('https://github.com/'):
             # git archive doesn't like https:// URLs, which we use with github.
             rest = git_url.split('https://github.com/', 1)[1]
             rest = re.sub(r'\.git/?$', '', rest).strip() # no .git suffix
@@ -120,6 +141,7 @@ def download_cephadm(ctx, config, ref):
                     ctx.cephadm,
                 ],
             )
+
         # sanity-check the resulting file and set executable bit
         cephadm_file_size = '$(stat -c%s {})'.format(ctx.cephadm)
         ctx.cluster.run(
@@ -154,6 +176,7 @@ def download_cephadm(ctx, config, ref):
                 ],
             )
 
+
 @contextlib.contextmanager
 def ceph_log(ctx, config):
     cluster_name = config['cluster']
@@ -169,6 +192,7 @@ def ceph_log(ctx, config):
 
     finally:
         log.info('Checking cluster log for badness...')
+
         def first_in_ceph_log(pattern, excludes):
             """
             Find the first occurrence of the pattern specified in the Ceph log,
@@ -460,8 +484,8 @@ def ceph_bootstrap(ctx, config):
             try:
                 ctx.daemons.get_daemon(type_, id_, cluster).stop()
             except Exception:
-                log.exception(f'Failed to stop "{role}"')
-                raise 
+                log.exception('Failed to stop "{role}"'.format(role=role))
+                raise
 
         # clean up /etc/ceph
         ctx.cluster.run(args=[
