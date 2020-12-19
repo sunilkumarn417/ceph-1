@@ -9,8 +9,8 @@ tasks:
           bucket_count: 1
           objects_count: 2000
           objects_size_range:
-            min: 5
-            max: 10
+            min: 5K
+            max: 10K
           test_ops:
             enable_versioning: true
             create_object: true
@@ -32,8 +32,8 @@ tasks:
           bucket_count: 1
           objects_count: 2000
           objects_size_range:
-            min: 5
-            max: 10
+            min: 5K
+            max: 10K
           test_ops:
             enable_versioning: true
             create_object: true
@@ -62,8 +62,8 @@ tasks:
           bucket_count: 1
           objects_count: 2000
           objects_size_range:
-            min: 5
-            max: 10
+            min: 5K
+            max: 10K
           test_ops:
             enable_versioning: true
             create_object: true
@@ -91,8 +91,8 @@ tasks:
           bucket_count: 1
           objects_count: 2000
           objects_size_range:
-            min: 5
-            max: 10
+            min: 5K
+            max: 10K
           test_ops:
             enable_versioning: false
             create_object: true
@@ -118,8 +118,8 @@ tasks:
           bucket_count: 1
           objects_count: 1
           objects_size_range:
-            min: 5
-            max: 15
+            min: 5K
+            max: 15K
           test_ops:
             enable_versioning: true
             create_object: true

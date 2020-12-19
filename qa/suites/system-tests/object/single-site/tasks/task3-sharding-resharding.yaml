@@ -7,8 +7,8 @@ tasks:
         config:
           objects_count: 20000
           objects_size_range:
-            min: 5
-            max: 10
+            min: 5K
+            max: 10K
           sharding_type: dynamic
           max_objects_per_shard: 100
           test_ops:
@@ -20,8 +20,8 @@ tasks:
         config:
           objects_count: 20000
           objects_size_range:
-            min: 5
-            max: 10
+            min: 5K
+            max: 10K
           sharding_type: manual
           shards: 97
           test_ops:

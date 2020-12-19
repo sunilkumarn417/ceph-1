@@ -7,8 +7,8 @@ tasks:
         config:
             local_file_delete: true
             user_count: 1
-            bucket_count: 3
-            objects_count: 5000
+            bucket_count: 1
+            objects_count: 700
             objects_size_range:
                 min: 300
                 max: 500
@@ -32,11 +32,11 @@ tasks:
             local_file_delete: true
             user_count: 1
             bucket_count: 1
-            objects_count: 20000
+            objects_count: 2000
             version_count: 5
             objects_size_range:
-                min: 5
-                max: 10
+                min: 5K
+                max: 10K
             test_ops:
                 enable_version: true
                 suspend_version: false

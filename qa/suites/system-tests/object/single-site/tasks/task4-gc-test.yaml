@@ -20,8 +20,8 @@ tasks:
             rgw_gc_obj_min_wait: 10
             rgw_gc_processor_period: 10
           objects_size_range:
-            min: 5
-            max: 10
+            min: 5K
+            max: 10K
           test_ops:
             create_bucket: true
             create_object: true

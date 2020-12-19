@@ -23,4 +23,4 @@ overrides:
       osd_scenario: collocated
       ceph_conf_overrides:
         global:
-          osd_pool_default_pg_autoscale_mode: on
+          osd_pool_default_pg_autoscale_mode: "on"
